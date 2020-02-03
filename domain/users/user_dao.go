@@ -2,7 +2,14 @@ package users
 
 import (
 	"fmt"
+	"github.com/lukavavetic/bookstore-users-api/datasource/mysql/users_db"
+	"github.com/lukavavetic/bookstore-users-api/utils/date"
 	"github.com/lukavavetic/bookstore-users-api/utils/errors"
+)
+
+const (
+	queryInsertUser = "INSERT INTO users(first_name, last_name, email, date_created) VALUES(?, ?, ?, ?);"
+	querySelectUser = "SELECT id, first_name, last_name, email, date_created FROM users WHERE id=?;"
 )
 
 var (
@@ -10,30 +17,45 @@ var (
 )
 
 func (user *User) Get() *errors.RestErr {
-	result := usersDB[user.Id]
-	if result == nil {
-		return errors.NotFound(fmt.Sprintf("user %d not found", user.Id))
+	stmt, err := users_db.Client.Prepare(querySelectUser)
+	if err != nil {
+		return errors.InternalServerError(err.Error())
 	}
 
-	user.Id = result.Id
-	user.FirstName = result.FirstName
-	user.LastName = result.LastName
-	user.Email = result.Email
-	user.DateCreated = result.DateCreated
+	defer stmt.Close()
+
+	res := stmt.QueryRow(user.Id)
+
+	if err := res.Scan(&user.Id, &user.FirstName, &user.LastName, &user.Email, &user.DateCreated); err != nil {
+		fmt.Println(err)
+		return errors.InternalServerError(err.Error())
+	}
+
 
 	return nil
 }
 
 func (user *User) Save() *errors.RestErr {
-	current := usersDB[user.Id]
-	if current != nil {
-		if current.Email == user.Email {
-			return errors.BadRequest(fmt.Sprintf("email %s already exists", user.Email))
-		}
-		return errors.BadRequest(fmt.Sprintf("user %d already exists", user.Id))
+	stmt, err := users_db.Client.Prepare(queryInsertUser)
+	if err != nil {
+		return errors.InternalServerError(err.Error())
 	}
 
-	usersDB[user.Id] = user
+	defer stmt.Close()
+
+	user.DateCreated = date.GetNowString()
+
+	insertResult, saveErr := stmt.Exec(user.FirstName, user.LastName, user.Email, user.DateCreated)
+	if saveErr != nil {
+		return errors.InternalServerError(saveErr.Error())
+	}
+
+	userId, err := insertResult.LastInsertId()
+	if err != nil {
+		return errors.InternalServerError(err.Error())
+	}
+
+	user.Id = userId
 
 	return nil
 }
